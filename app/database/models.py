@@ -1655,6 +1655,10 @@ class Tariff(Base):
     # Внешний сквад RemnaWave (UUID) — назначается пользователю при создании подписки
     external_squad_uuid = Column(String(255), nullable=True, default=None)
 
+    # Следующий тариф для авто-перехода при первом продлении (интро-тариф → целевой).
+    # NULL = обычный тариф, авто-перехода нет.
+    next_tariff_id = Column(Integer, ForeignKey('tariffs.id', ondelete='SET NULL'), nullable=True, default=None)
+
     created_at = Column(AwareDateTime(), default=func.now())
     updated_at = Column(AwareDateTime(), default=func.now(), onupdate=func.now())
 
@@ -1667,6 +1671,9 @@ class Tariff(Base):
 
     # Подписки на этом тарифе
     subscriptions = relationship('Subscription', back_populates='tariff')
+
+    # Целевой тариф для авто-перехода (self-referential)
+    next_tariff = relationship('Tariff', remote_side=[id], foreign_keys=[next_tariff_id])
 
     @property
     def is_unlimited_traffic(self) -> bool:

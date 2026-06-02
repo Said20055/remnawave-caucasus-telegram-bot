@@ -16,6 +16,7 @@ from app.database.crud.tariff import (
     create_tariff,
     delete_tariff,
     get_active_subscriptions_count_by_tariff_id,
+    get_all_tariffs,
     get_tariff_by_id,
     get_tariff_subscriptions_count,
     get_tariffs_with_subscriptions_count,
@@ -202,6 +203,13 @@ def get_tariff_view_keyboard(
         )
         # Примечание: отключение суточного режима убрано - это необратимое решение при создании
 
+    # Авто-переход на следующий тариф (интро → целевой)
+    if not is_daily:
+        next_label = '🔗 Следующий тариф' if not tariff.next_tariff_id else '🔗 Следующий тариф ✅'
+        buttons.append(
+            [InlineKeyboardButton(text=next_label, callback_data=f'admin_tariff_edit_next:{tariff.id}')]
+        )
+
     # Переключение триала
     if tariff.is_trial_available:
         buttons.append(
@@ -260,7 +268,9 @@ def _format_traffic_topup_packages(tariff: Tariff) -> str:
     return '\n'.join(lines)
 
 
-def format_tariff_info(tariff: Tariff, language: str, subs_count: int = 0) -> str:
+def format_tariff_info(
+    tariff: Tariff, language: str, subs_count: int = 0, next_tariff_name: str | None = None
+) -> str:
     """Форматирует информацию о тарифе."""
     get_texts(language)
 
@@ -321,6 +331,14 @@ def format_tariff_info(tariff: Tariff, language: str, subs_count: int = 0) -> st
         price_block = f'<b>Цены:</b>\n{prices_display}'
         tariff_type = '📅 Периодный'
 
+    # Авто-переход на следующий тариф (интро → целевой)
+    next_tariff_id = getattr(tariff, 'next_tariff_id', None)
+    if next_tariff_id:
+        _next_name = next_tariff_name or f'#{next_tariff_id}'
+        next_tariff_block = f'\n<b>🔗 Авто-переход после продления:</b> {html.escape(_next_name)}'
+    else:
+        next_tariff_block = ''
+
     return f"""📦 <b>Тариф: {html.escape(tariff.name)}</b>
 
 {status} | {tariff_type}
@@ -343,7 +361,7 @@ def format_tariff_info(tariff: Tariff, language: str, subs_count: int = 0) -> st
 {price_block}
 
 <b>Серверы:</b> {squads_display}
-<b>Промогруппы:</b> {promo_display}
+<b>Промогруппы:</b> {promo_display}{next_tariff_block}
 
 📊 Подписок на тарифе: {subs_count}
 
@@ -458,13 +476,104 @@ async def view_tariff(
         return
 
     subs_count = await get_tariff_subscriptions_count(db, tariff_id)
+    next_name = await _get_next_tariff_name(db, tariff)
 
     await callback.message.edit_text(
-        format_tariff_info(tariff, db_user.language, subs_count),
+        format_tariff_info(tariff, db_user.language, subs_count, next_tariff_name=next_name),
         reply_markup=get_tariff_view_keyboard(tariff, db_user.language),
         parse_mode='HTML',
     )
     await callback.answer()
+
+
+async def _get_next_tariff_name(db: AsyncSession, tariff: Tariff) -> str | None:
+    """Возвращает имя целевого тарифа авто-перехода (или None)."""
+    next_id = getattr(tariff, 'next_tariff_id', None)
+    if not next_id:
+        return None
+    next_tariff = await get_tariff_by_id(db, next_id, with_promo_groups=False)
+    return next_tariff.name if next_tariff else None
+
+
+@admin_required
+@error_handler
+async def start_edit_tariff_next(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    """Показывает список тарифов для выбора авто-перехода."""
+    texts = get_texts(db_user.language)
+    tariff_id = int(callback.data.split(':')[1])
+    tariff = await get_tariff_by_id(db, tariff_id)
+
+    if not tariff:
+        await callback.answer('Тариф не найден', show_alert=True)
+        return
+
+    all_tariffs = await get_all_tariffs(db, include_inactive=True)
+    buttons = []
+    for t in all_tariffs:
+        if t.id == tariff_id or getattr(t, 'is_daily', False):
+            continue
+        mark = ' ✅' if tariff.next_tariff_id == t.id else ''
+        buttons.append(
+            [InlineKeyboardButton(text=f'{t.name}{mark}', callback_data=f'admin_tariff_set_next:{tariff_id}:{t.id}')]
+        )
+
+    if tariff.next_tariff_id:
+        buttons.append(
+            [InlineKeyboardButton(text='❌ Убрать переход', callback_data=f'admin_tariff_set_next:{tariff_id}:0')]
+        )
+    buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data=f'admin_tariff_view:{tariff_id}')])
+
+    await callback.message.edit_text(
+        '🔗 <b>Авто-переход на следующий тариф</b>\n\n'
+        'Выберите тариф, на который подписка автоматически перейдёт при первом '
+        'автопродлении (напр. интро 1₽/неделя → целевой 500₽/месяц).\n\n'
+        '⚠️ У целевого тарифа должна быть задана цена за нужный период, '
+        'а у пользователя — сохранённая карта (YooKassa) и включённый автоплатёж.',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        parse_mode='HTML',
+    )
+    await callback.answer()
+
+
+@admin_required
+@error_handler
+async def set_tariff_next(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    """Сохраняет выбранный целевой тариф авто-перехода (или убирает его)."""
+    parts = callback.data.split(':')
+    tariff_id = int(parts[1])
+    target_id = int(parts[2])
+
+    tariff = await get_tariff_by_id(db, tariff_id)
+    if not tariff:
+        await callback.answer('Тариф не найден', show_alert=True)
+        return
+
+    new_next: int | None = None
+    if target_id:
+        target = await get_tariff_by_id(db, target_id, with_promo_groups=False)
+        if not target or target.id == tariff_id:
+            await callback.answer('Некорректный целевой тариф', show_alert=True)
+            return
+        new_next = target.id
+
+    tariff = await update_tariff(db, tariff, next_tariff_id=new_next)
+    subs_count = await get_tariff_subscriptions_count(db, tariff_id)
+    next_name = await _get_next_tariff_name(db, tariff)
+
+    await callback.answer('✅ Сохранено')
+    await callback.message.edit_text(
+        format_tariff_info(tariff, db_user.language, subs_count, next_tariff_name=next_name),
+        reply_markup=get_tariff_view_keyboard(tariff, db_user.language),
+        parse_mode='HTML',
+    )
 
 
 @admin_required
@@ -2856,6 +2965,10 @@ def register_handlers(dp: Dispatcher):
     # Редактирование названия
     dp.callback_query.register(start_edit_tariff_name, F.data.startswith('admin_tariff_edit_name:'))
     dp.message.register(process_edit_tariff_name, AdminStates.editing_tariff_name)
+
+    # Авто-переход на следующий тариф
+    dp.callback_query.register(start_edit_tariff_next, F.data.startswith('admin_tariff_edit_next:'))
+    dp.callback_query.register(set_tariff_next, F.data.startswith('admin_tariff_set_next:'))
 
     # Редактирование описания
     dp.callback_query.register(start_edit_tariff_description, F.data.startswith('admin_tariff_edit_desc:'))

@@ -1283,12 +1283,17 @@ class MonitoringService:
 
                     user_identifier = user.telegram_id or f'email:{user.id}'
 
-                    # Определяем период продления: из тарифа (минимальный) или 30 дней по умолчанию
-                    tariff = getattr(subscription, 'tariff', None)
-                    if tariff:
-                        autopay_period = tariff.get_shortest_period() or 30
-                    else:
-                        autopay_period = 30
+                    # Определяем целевой тариф и период продления.
+                    # Интро-тариф с next_tariff_id → авто-переход на целевой тариф.
+                    from app.services.recurrent_payment_service import resolve_renewal_target
+
+                    target_tariff, autopay_period = await resolve_renewal_target(db, subscription)
+                    # Захватываем id заранее: после subtract_user_balance объект target_tariff
+                    # может оказаться expired в async-сессии (sync lazy-load → MissingGreenlet).
+                    target_tariff_id = target_tariff.id if target_tariff is not None else None
+                    is_tariff_transition = (
+                        target_tariff_id is not None and target_tariff_id != subscription.tariff_id
+                    )
 
                     try:
                         from app.database.crud.user import lock_user_for_pricing
@@ -1296,12 +1301,22 @@ class MonitoringService:
 
                         user = await lock_user_for_pricing(db, user.id)
 
-                        pricing = await pricing_engine.calculate_renewal_price(
-                            db,
-                            subscription,
-                            autopay_period,
-                            user=user,
-                        )
+                        if is_tariff_transition:
+                            # Считаем по цене целевого тарифа, переключение tariff_id
+                            # выполняется ниже только при успешном списании.
+                            pricing = await pricing_engine.calculate_tariff_purchase_price(
+                                target_tariff,
+                                autopay_period,
+                                device_limit=subscription.device_limit or 0,
+                                user=user,
+                            )
+                        else:
+                            pricing = await pricing_engine.calculate_renewal_price(
+                                db,
+                                subscription,
+                                autopay_period,
+                                user=user,
+                            )
                         renewal_cost = pricing.final_total
                     except Exception as e:
                         logger.error(
@@ -1366,6 +1381,25 @@ class MonitoringService:
                                 self._notified_users.add(autopay_key)
                                 continue
                             subscription = refreshed_subscription
+
+                            # Авто-переход интро-тарифа на целевой: применяем параметры
+                            # нового тарифа (трафик/устройства/сервера) перед продлением.
+                            # Делаем это только после успешного списания.
+                            if is_tariff_transition and subscription.tariff_id != target_tariff_id:
+                                from app.database.crud.subscription import apply_tariff_switch
+                                from app.database.crud.tariff import get_tariff_by_id
+
+                                # Перечитываем целевой тариф в текущей сессии (свежий объект)
+                                fresh_target = await get_tariff_by_id(db, target_tariff_id, with_promo_groups=False)
+                                if fresh_target is not None:
+                                    logger.info(
+                                        '🔀 Autopay: авто-переход на следующий тариф',
+                                        subscription_id=subscription.id,
+                                        user_id=user.id,
+                                        from_tariff_id=subscription.tariff_id,
+                                        to_tariff_id=target_tariff_id,
+                                    )
+                                    await apply_tariff_switch(db, subscription, fresh_target)
 
                             # extend_subscription сам обработает EXPIRED→ACTIVE переход
                             # (проверяет status + end_date для определения was_expired)

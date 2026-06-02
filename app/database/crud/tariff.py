@@ -309,6 +309,8 @@ async def update_tariff(
     traffic_reset_mode: str | None = ...,  # ... = не передан, None = сбросить к глобальной настройке
     # Внешний сквад RemnaWave
     external_squad_uuid: str | None = ...,  # ... = не передан, None = убрать внешний сквад
+    # Следующий тариф для авто-перехода (интро → целевой)
+    next_tariff_id: int | None = ...,  # ... = не передан, None = убрать переход
 ) -> Tariff:
     """Обновляет существующий тариф."""
     if name is not None:
@@ -378,6 +380,9 @@ async def update_tariff(
     # Внешний сквад
     if external_squad_uuid is not ...:
         tariff.external_squad_uuid = external_squad_uuid
+    # Следующий тариф для авто-перехода
+    if next_tariff_id is not ...:
+        tariff.next_tariff_id = next_tariff_id
 
     # Обновляем промогруппы если указаны
     if promo_group_ids is not None:

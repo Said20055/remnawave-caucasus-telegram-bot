@@ -795,6 +795,12 @@ class Settings(BaseSettings):
     MINIAPP_CUSTOM_URL: str = ''
     MINIAPP_STATIC_PATH: str = 'miniapp'
 
+    # Нативная кнопка меню Telegram (слева от поля ввода) как Web App.
+    # Устанавливается при старте бота через setChatMenuButton (для всех приватных чатов).
+    MENU_BUTTON_WEBAPP_ENABLED: bool = False
+    MENU_BUTTON_WEBAPP_TEXT: str = 'Открыть'
+    MENU_BUTTON_WEBAPP_URL: str = ''  # если пусто — берётся MINIAPP_CUSTOM_URL
+
     # Media upload settings (news article images/videos)
     MEDIA_UPLOAD_DIR: str = './uploads'
     MEDIA_MAX_IMAGE_SIZE_MB: int = 10
@@ -1704,6 +1710,10 @@ class Settings(BaseSettings):
             if value:
                 return value
         return None
+
+    def get_menu_button_webapp_url(self) -> str:
+        """URL для нативной кнопки меню (Web App): отдельная переменная или MINIAPP_CUSTOM_URL."""
+        return (self.MENU_BUTTON_WEBAPP_URL or self.MINIAPP_CUSTOM_URL or '').strip()
 
     _CABINET_URL_DEFAULT = 'https://example.com/cabinet'
 

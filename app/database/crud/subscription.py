@@ -68,6 +68,48 @@ def calc_device_limit_on_tariff_switch(
     return new_base
 
 
+async def apply_tariff_switch(db: AsyncSession, subscription: Subscription, new_tariff) -> None:
+    """Применяет параметры нового тарифа к подписке (без продления срока/оплаты).
+
+    Переносит подписку на другой тариф: tariff_id, лимит трафика, лимит
+    устройств (база нового тарифа, докупленные не переносятся), список серверов.
+    Сбрасывает докупленный трафик. Используется автопереходом интро-тарифа на
+    целевой и повторяет паттерн ручной смены тарифа в handlers/subscription.
+
+    Срок действия (end_date) и оплата здесь НЕ трогаются — это задача вызывающей
+    стороны (autopay делает extend_subscription после переключения).
+    """
+    from app.database.crud.server_squad import get_all_server_squads
+
+    old_tariff = subscription.tariff
+
+    squads = list(new_tariff.allowed_squads or [])
+    if not squads:
+        all_servers, _ = await get_all_server_squads(db, available_only=True)
+        squads = [s.squad_uuid for s in all_servers if s.squad_uuid]
+
+    # Assign the relationship (keeps subscription.tariff in sync and sets tariff_id)
+    subscription.tariff = new_tariff
+    subscription.traffic_limit_gb = new_tariff.traffic_limit_gb
+    subscription.device_limit = calc_device_limit_on_tariff_switch(
+        current_device_limit=subscription.device_limit,
+        old_tariff_device_limit=old_tariff.device_limit if old_tariff else None,
+        new_tariff_device_limit=new_tariff.device_limit,
+        max_device_limit=getattr(new_tariff, 'max_device_limit', None),
+    )
+    subscription.connected_squads = squads
+
+    # Сбрасываем докупленный трафик при смене тарифа
+    from app.database.models import TrafficPurchase
+
+    await db.execute(delete(TrafficPurchase).where(TrafficPurchase.subscription_id == subscription.id))
+    subscription.purchased_traffic_gb = 0
+    subscription.traffic_reset_at = None
+
+    if settings.RESET_TRAFFIC_ON_TARIFF_SWITCH:
+        subscription.traffic_used_gb = 0.0
+
+
 def is_active_paid_subscription(subscription: Subscription | None) -> bool:
     """Return True if subscription is active, paid (non-trial), and not expired."""
     if not subscription:
@@ -279,6 +321,17 @@ async def create_paid_subscription(
 
     short_id = await generate_unique_short_id(db)
 
+    # Интро-тариф (с заданным next_tariff_id) требует включённого автоплатежа,
+    # иначе авто-переход на целевой тариф не сработает — autopay/recurrent
+    # фильтруют подписки по autopay_enabled == True.
+    autopay_enabled = settings.is_autopay_enabled_by_default()
+    if tariff_id and not is_trial:
+        from app.database.crud.tariff import get_tariff_by_id
+
+        _tariff = await get_tariff_by_id(db, tariff_id, with_promo_groups=False)
+        if _tariff is not None and getattr(_tariff, 'next_tariff_id', None):
+            autopay_enabled = True
+
     subscription = Subscription(
         user_id=user_id,
         status=SubscriptionStatus.ACTIVE.value,
@@ -288,7 +341,7 @@ async def create_paid_subscription(
         traffic_limit_gb=traffic_limit_gb,
         device_limit=device_limit,
         connected_squads=final_squads,
-        autopay_enabled=settings.is_autopay_enabled_by_default(),
+        autopay_enabled=autopay_enabled,
         autopay_days_before=settings.DEFAULT_AUTOPAY_DAYS_BEFORE,
         tariff_id=tariff_id,
         remnawave_short_id=short_id,

@@ -52,6 +52,33 @@ class _DailyGuard:
 _daily_guard = _DailyGuard()
 
 
+async def resolve_renewal_target(db: AsyncSession, subscription: Subscription) -> tuple[object | None, int]:
+    """Определяет тариф и период, по которым нужно продлевать подписку.
+
+    Если у текущего тарифа задан next_tariff_id (интро-тариф), продление
+    должно идти по целевому тарифу (напр. 1₽/7д → 500₽/30д). У целевого
+    тарифа next_tariff_id обычно пуст, поэтому последующие продления остаются
+    на нём — переход срабатывает ровно один раз.
+
+    Returns:
+        (tariff_for_renewal, period_days). tariff может быть None для
+        классических подписок без тарифа — тогда period_days = 30.
+    """
+    tariff = getattr(subscription, 'tariff', None)
+    if tariff is None:
+        return None, 30
+
+    next_tariff_id = getattr(tariff, 'next_tariff_id', None)
+    if next_tariff_id:
+        from app.database.crud.tariff import get_tariff_by_id
+
+        next_tariff = await get_tariff_by_id(db, next_tariff_id)
+        if next_tariff is not None:
+            return next_tariff, (next_tariff.get_shortest_period() or 30)
+
+    return tariff, (tariff.get_shortest_period() or 30)
+
+
 def _build_extend_keyboard(texts, subscription_id: int | None = None) -> InlineKeyboardMarkup:
     """Клавиатура с кнопкой продления подписки для уведомлений."""
     extend_callback = (
@@ -219,12 +246,8 @@ async def _process_single_subscription(
     """
     from app.database.crud.saved_payment_method import get_active_payment_methods_by_user
 
-    # Рассчитываем стоимость продления
-    tariff = getattr(subscription, 'tariff', None)
-    if tariff:
-        autopay_period = tariff.get_shortest_period() or 30
-    else:
-        autopay_period = 30
+    # Определяем целевой тариф продления (интро-тариф → целевой, если задан next_tariff_id)
+    target_tariff, autopay_period = await resolve_renewal_target(db, subscription)
 
     try:
         from app.database.crud.user import lock_user_for_pricing
@@ -233,12 +256,22 @@ async def _process_single_subscription(
         # TOCTOU: lock user row before pricing to prevent concurrent promo/balance races
         user = await lock_user_for_pricing(db, user.id)
 
-        pricing = await pricing_engine.calculate_renewal_price(
-            db,
-            subscription,
-            autopay_period,
-            user=user,
-        )
+        if target_tariff is not None and target_tariff.id != subscription.tariff_id:
+            # Будет авто-переход на другой тариф — считаем по цене целевого тарифа,
+            # не переключая subscription.tariff_id (переключение делает monitoring autopay).
+            pricing = await pricing_engine.calculate_tariff_purchase_price(
+                target_tariff,
+                autopay_period,
+                device_limit=subscription.device_limit or 0,
+                user=user,
+            )
+        else:
+            pricing = await pricing_engine.calculate_renewal_price(
+                db,
+                subscription,
+                autopay_period,
+                user=user,
+            )
         renewal_cost = pricing.final_total
     except Exception as e:
         logger.error(

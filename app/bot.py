@@ -288,6 +288,26 @@ async def setup_bot() -> tuple[Bot, Dispatcher]:
     except Exception as e:
         logger.error('Ошибка запуска RemnaWave retry queue', error=e)
 
+    # Нативная кнопка меню Telegram (Web App) — слева от поля ввода
+    if settings.MENU_BUTTON_WEBAPP_ENABLED:
+        menu_button_url = settings.get_menu_button_webapp_url()
+        if menu_button_url:
+            try:
+                await bot.set_chat_menu_button(
+                    menu_button=types.MenuButtonWebApp(
+                        text=(settings.MENU_BUTTON_WEBAPP_TEXT or 'Menu'),
+                        web_app=types.WebAppInfo(url=menu_button_url),
+                    )
+                )
+                logger.info('✅ Кнопка меню Web App установлена', url=menu_button_url)
+            except Exception as e:
+                logger.error('Не удалось установить кнопку меню Web App', error=e)
+        else:
+            logger.warning(
+                '⚠️ MENU_BUTTON_WEBAPP_ENABLED=true, но URL не задан '
+                '(укажите MENU_BUTTON_WEBAPP_URL или MINIAPP_CUSTOM_URL).'
+            )
+
     logger.info('Бот успешно настроен')
 
     return bot, dp

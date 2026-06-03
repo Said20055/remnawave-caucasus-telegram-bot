@@ -6652,6 +6652,13 @@ async def purchase_tariff_endpoint(
             tariff_id=tariff.id,
         )
 
+    # Интро-тариф (с заданным next_tariff_id) требует включённого автоплатежа,
+    # иначе авто-переход на целевой тариф не сработает. Покрывает и ветку extend.
+    if getattr(tariff, 'next_tariff_id', None) and not subscription.autopay_enabled:
+        subscription.autopay_enabled = True
+        await db.commit()
+        await db.refresh(subscription)
+
     # Инициализация daily полей при покупке суточного тарифа
     is_daily_tariff = getattr(tariff, 'is_daily', False)
     if is_daily_tariff:

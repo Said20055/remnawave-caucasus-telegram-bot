@@ -200,6 +200,8 @@ async def create_tariff(
     traffic_reset_mode: str | None = None,  # DAY, WEEK, MONTH, MONTH_ROLLING, NO_RESET, None = глобальная настройка
     # Внешний сквад RemnaWave
     external_squad_uuid: str | None = None,
+    # Следующий тариф для авто-перехода (интро → целевой)
+    next_tariff_id: int | None = None,
 ) -> Tariff:
     """Создает новый тариф."""
     normalized_prices = _normalize_period_prices(period_prices)
@@ -240,6 +242,8 @@ async def create_tariff(
         traffic_reset_mode=traffic_reset_mode,
         # Внешний сквад
         external_squad_uuid=external_squad_uuid,
+        # Следующий тариф для авто-перехода
+        next_tariff_id=next_tariff_id,
     )
 
     db.add(tariff)

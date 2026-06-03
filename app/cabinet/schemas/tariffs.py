@@ -115,6 +115,9 @@ class TariffDetailResponse(BaseModel):
     traffic_reset_mode: str | None = None  # DAY, WEEK, MONTH, MONTH_ROLLING, NO_RESET, None = глобальная настройка
     # Внешний сквад RemnaWave
     external_squad_uuid: str | None = None
+    # Авто-переход на следующий тариф при первом продлении (интро → целевой)
+    next_tariff_id: int | None = None
+    next_tariff_name: str | None = None
     # Показывать в подарках
     show_in_gift: bool = True
     created_at: datetime
@@ -173,6 +176,8 @@ class TariffCreateRequest(BaseModel):
     traffic_reset_mode: str | None = None  # DAY, WEEK, MONTH, MONTH_ROLLING, NO_RESET, None = глобальная настройка
     # Внешний сквад RemnaWave
     external_squad_uuid: str | None = Field(None, pattern=UUID_PATTERN)
+    # Авто-переход на следующий тариф при первом продлении (интро → целевой)
+    next_tariff_id: int | None = Field(None, ge=1)
     # Показывать в подарках
     show_in_gift: bool = True
 
@@ -214,6 +219,8 @@ class TariffUpdateRequest(BaseModel):
     traffic_reset_mode: str | None = None  # DAY, WEEK, MONTH, MONTH_ROLLING, NO_RESET, None = глобальная настройка
     # Внешний сквад RemnaWave
     external_squad_uuid: str | None = Field(None, pattern=UUID_PATTERN)
+    # Авто-переход на следующий тариф при первом продлении (интро → целевой)
+    next_tariff_id: int | None = Field(None, ge=1)
     # Показывать в подарках
     show_in_gift: bool | None = None
 

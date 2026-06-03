@@ -224,6 +224,12 @@ async def get_tariff(
     promo_groups = await _get_tariff_promo_groups(db, tariff)
     subs_count = await get_tariff_subscriptions_count(db, tariff.id)
 
+    # Имя целевого тарифа авто-перехода (если задан)
+    next_tariff_name = None
+    if tariff.next_tariff_id:
+        next_tariff = await get_tariff_by_id(db, tariff.next_tariff_id, with_promo_groups=False)
+        next_tariff_name = next_tariff.name if next_tariff else None
+
     # Преобразуем server_traffic_limits в формат для схемы
     server_limits_response = {}
     for uuid, limit_data in server_traffic_limits.items():
@@ -271,6 +277,9 @@ async def get_tariff(
         traffic_reset_mode=tariff.traffic_reset_mode,
         # Внешний сквад
         external_squad_uuid=tariff.external_squad_uuid,
+        # Авто-переход на следующий тариф
+        next_tariff_id=tariff.next_tariff_id,
+        next_tariff_name=next_tariff_name,
         # Показывать в подарках
         show_in_gift=tariff.show_in_gift,
         created_at=tariff.created_at,
@@ -329,6 +338,8 @@ async def create_new_tariff(
         traffic_reset_mode=request.traffic_reset_mode,
         # Внешний сквад
         external_squad_uuid=request.external_squad_uuid,
+        # Авто-переход на следующий тариф
+        next_tariff_id=request.next_tariff_id,
         # Показывать в подарках
         show_in_gift=request.show_in_gift,
     )
@@ -427,6 +438,21 @@ async def update_existing_tariff(
     # Внешний сквад (None допускается для сброса)
     if 'external_squad_uuid' in request.model_fields_set:
         updates['external_squad_uuid'] = request.external_squad_uuid
+    # Авто-переход на следующий тариф (None допускается для сброса)
+    if 'next_tariff_id' in request.model_fields_set:
+        if request.next_tariff_id is not None:
+            if request.next_tariff_id == tariff_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail='Tariff cannot reference itself as the next tariff',
+                )
+            target = await get_tariff_by_id(db, request.next_tariff_id, with_promo_groups=False)
+            if target is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail='Next tariff not found',
+                )
+        updates['next_tariff_id'] = request.next_tariff_id
     # Показывать в подарках
     if request.show_in_gift is not None:
         updates['show_in_gift'] = request.show_in_gift

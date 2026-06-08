@@ -963,6 +963,18 @@ class Settings(BaseSettings):
     ENABLE_DEEP_LINKS: bool = True
     APP_CONFIG_CACHE_TTL: int = 3600
 
+    # ===== Внешние подписки (импорт чужих конфигов с периодическим обновлением) =====
+    EXTERNAL_SUBSCRIPTIONS_ENABLED: bool = False
+    # Секретный токен в публичном URL выдачи: /api/extsub/<token>
+    EXTERNAL_SUB_TOKEN: str | None = None
+    # Публичная база для ссылки на подписку (по умолчанию CABINET_URL + /api)
+    EXTERNAL_SUB_BASE_URL: str | None = None
+    # Интервал авто-обновления источника по умолчанию (минуты)
+    EXTERNAL_SUB_DEFAULT_REFRESH_MINUTES: int = 360
+    # Заголовок профиля, который видит клиент (Happ), и интервал авто-обновления у клиента (часы)
+    EXTERNAL_SUB_PROFILE_TITLE: str = 'Extra'
+    EXTERNAL_SUB_PROFILE_UPDATE_HOURS: int = 12
+
     VERSION_CHECK_ENABLED: bool = True
     VERSION_CHECK_REPO: str = 'fr1ngg/remnawave-bedolaga-telegram-bot'
     VERSION_CHECK_INTERVAL_HOURS: int = 1
@@ -3039,6 +3051,25 @@ class Settings(BaseSettings):
 
     def is_web_api_enabled(self) -> bool:
         return bool(self.WEB_API_ENABLED)
+
+    def is_external_subscriptions_enabled(self) -> bool:
+        return bool(self.EXTERNAL_SUBSCRIPTIONS_ENABLED)
+
+    def get_external_sub_base_url(self) -> str:
+        """Публичная база для ссылки на внешнюю подписку (без хвостового слэша)."""
+        base = (self.EXTERNAL_SUB_BASE_URL or '').strip()
+        if not base:
+            cabinet = (self.CABINET_URL or '').strip().rstrip('/')
+            base = f'{cabinet}/api' if cabinet else ''
+        return base.rstrip('/')
+
+    def get_external_sub_public_url(self) -> str | None:
+        """Полный публичный URL выдачи внешней подписки или None, если не настроено."""
+        base = self.get_external_sub_base_url()
+        token = (self.EXTERNAL_SUB_TOKEN or '').strip()
+        if not base or not token:
+            return None
+        return f'{base}/extsub/{token}'
 
     def get_web_api_allowed_origins(self) -> list[str]:
         raw = (self.WEB_API_ALLOWED_ORIGINS or '').split(',')

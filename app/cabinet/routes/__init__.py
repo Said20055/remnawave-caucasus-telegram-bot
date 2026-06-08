@@ -12,6 +12,7 @@ from .admin_button_styles import router as admin_button_styles_router
 from .admin_campaigns import router as admin_campaigns_router
 from .admin_channels import router as admin_channels_router
 from .admin_email_templates import router as admin_email_templates_router
+from .admin_external_subs import router as admin_external_subs_router
 from .admin_info_pages import router as admin_info_pages_router
 from .admin_landings import router as admin_landings_router
 from .admin_menu_layout import router as admin_menu_layout_router
@@ -123,6 +124,7 @@ router.include_router(admin_settings_router)
 router.include_router(admin_wheel_router)
 router.include_router(admin_tariffs_router)
 router.include_router(admin_servers_router)
+router.include_router(admin_external_subs_router)
 router.include_router(admin_stats_router)
 router.include_router(admin_referral_network_router)
 router.include_router(admin_sales_stats_router)

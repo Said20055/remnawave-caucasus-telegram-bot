@@ -240,6 +240,18 @@ class MonitoringService:
                             error=recurrent_error,
                             exc_info=True,
                         )
+                # Периодическое обновление внешних подписок (импортированные конфиги)
+                if settings.is_external_subscriptions_enabled():
+                    try:
+                        from app.services.external_subscription_service import refresh_due_sources
+
+                        await refresh_due_sources(db)
+                    except Exception as ext_error:
+                        logger.error(
+                            'Ошибка обновления внешних подписок',
+                            error=ext_error,
+                            exc_info=True,
+                        )
                 await self._check_expired_subscriptions(db)
                 await self._check_expiring_subscriptions(db)
                 await self._check_trial_expiring_soon(db)

@@ -4077,3 +4077,66 @@ class InfoPage(Base):
     replaces_tab = Column(String(20), nullable=True)  # 'faq', 'rules', 'privacy', 'offer', or null
     created_at = Column(AwareDateTime(), server_default=func.now())
     updated_at = Column(AwareDateTime(), server_default=func.now(), onupdate=func.now())
+
+
+class ExternalSubscriptionSource(Base):
+    """Источник внешней подписки (чужой подписочный URL), из которого импортируются конфиги."""
+
+    __tablename__ = 'external_subscription_sources'
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    url = Column(Text, nullable=False)
+    # Кастомные HTTP-заголовки для фетча (None = дефолтные Happ-заголовки)
+    headers = Column(JSON, nullable=True, default=None)
+    refresh_interval_minutes = Column(Integer, nullable=False, default=360, server_default='360')
+    is_active = Column(Boolean, nullable=False, default=True, server_default='true')
+    last_fetched_at = Column(AwareDateTime(), nullable=True)
+    last_status = Column(String(20), nullable=True)  # ok | error
+    last_error = Column(Text, nullable=True)
+    configs_count = Column(Integer, nullable=False, default=0, server_default='0')
+    created_at = Column(AwareDateTime(), server_default=func.now())
+    updated_at = Column(AwareDateTime(), server_default=func.now(), onupdate=func.now())
+
+    configs = relationship(
+        'ExternalConfig',
+        back_populates='source',
+        cascade='all, delete-orphan',
+        passive_deletes=True,
+    )
+
+    def __repr__(self):
+        return f"<ExternalSubscriptionSource(id={self.id}, name='{self.name}', active={self.is_active})>"
+
+
+class ExternalConfig(Base):
+    """Отдельный конфиг (vless/vmess/...), извлечённый из внешней подписки."""
+
+    __tablename__ = 'external_configs'
+    __table_args__ = (
+        UniqueConstraint('source_id', 'remote_key', name='uq_external_config_source_remote'),
+        Index('ix_external_configs_selected_active', 'is_selected', 'is_active'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_id = Column(
+        Integer,
+        ForeignKey('external_subscription_sources.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    name = Column(String(255), nullable=False)
+    raw_link = Column(Text, nullable=False)
+    protocol = Column(String(20), nullable=True)
+    # Стабильный ключ конфига внутри источника (protocol+host:port) — для матчинга при обновлении
+    remote_key = Column(String(255), nullable=False)
+    is_selected = Column(Boolean, nullable=False, default=False, server_default='false')
+    is_active = Column(Boolean, nullable=False, default=True, server_default='true')
+    last_seen_at = Column(AwareDateTime(), nullable=True)
+    created_at = Column(AwareDateTime(), server_default=func.now())
+    updated_at = Column(AwareDateTime(), server_default=func.now(), onupdate=func.now())
+
+    source = relationship('ExternalSubscriptionSource', back_populates='configs')
+
+    def __repr__(self):
+        return f"<ExternalConfig(id={self.id}, source={self.source_id}, proto='{self.protocol}', selected={self.is_selected})>"

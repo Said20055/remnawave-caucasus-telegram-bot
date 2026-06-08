@@ -1,0 +1,45 @@
+"""Публичная выдача внешней подписки (без авторизации, защита — секретный токен в пути).
+
+GET /extsub/{token} → base64-список выбранных внешних конфигов (формат Happ/v2ray).
+Через единый веб-сервер доступно как https://<host>/api/extsub/<token>.
+"""
+
+from __future__ import annotations
+
+import base64
+
+import structlog
+from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi.responses import PlainTextResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.services import external_subscription_service as ext_service
+
+from ..dependencies import get_db_session
+
+
+logger = structlog.get_logger(__name__)
+
+router = APIRouter()
+
+
+@router.get('/extsub/{token}', include_in_schema=False)
+async def serve_external_subscription(
+    token: str = Path(..., min_length=1),
+    db: AsyncSession = Depends(get_db_session),
+) -> PlainTextResponse:
+    configured = (settings.EXTERNAL_SUB_TOKEN or '').strip()
+    # 404 (а не 401/403), чтобы не раскрывать существование эндпоинта при неверном токене
+    if not settings.is_external_subscriptions_enabled() or not configured or token != configured:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    body = await ext_service.build_external_subscription_b64(db)
+
+    title_b64 = base64.b64encode((settings.EXTERNAL_SUB_PROFILE_TITLE or 'Extra').encode('utf-8')).decode('utf-8')
+    headers = {
+        'profile-title': f'base64:{title_b64}',
+        'profile-update-interval': str(settings.EXTERNAL_SUB_PROFILE_UPDATE_HOURS or 12),
+        'content-disposition': 'inline',
+    }
+    return PlainTextResponse(content=body, media_type='text/plain; charset=utf-8', headers=headers)

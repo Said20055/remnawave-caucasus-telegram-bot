@@ -218,7 +218,7 @@ def create_web_api_app() -> FastAPI:
         app.add_middleware(RequestLoggingMiddleware)
 
     app.include_router(health.router)
-    if settings.is_external_subscriptions_enabled():
+    if settings.is_external_subscriptions_enabled() or settings.is_merged_subscription_enabled():
         app.include_router(extsub.router, tags=['external-subscriptions'])
     app.include_router(stats.router, prefix='/stats', tags=['stats'])
     app.include_router(config.router, prefix='/settings', tags=['settings'])

@@ -2887,10 +2887,18 @@ async def _load_subscription_links(
     if not info:
         return {}
 
+    # Слитая подписка: пользователю показываем бот-ссылку (Remnawave + внешние),
+    # а не прямую панельную.
+    display_url = info.subscription_url
+    if settings.is_merged_subscription_enabled():
+        bot_url = settings.get_bot_subscription_url(subscription.remnawave_short_uuid)
+        if bot_url:
+            display_url = bot_url
+
     payload: dict[str, Any] = {
         'links': list(info.links or []),
         'ss_conf_links': dict(info.ss_conf_links or {}),
-        'subscription_url': info.subscription_url,
+        'subscription_url': display_url,
         'happ': info.happ,
         'happ_link': getattr(info, 'happ_link', None),
         'happ_crypto_link': getattr(info, 'happ_crypto_link', None),

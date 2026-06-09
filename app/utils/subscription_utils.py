@@ -51,6 +51,14 @@ def get_display_subscription_link(subscription: Subscription | None) -> str | No
 
     base_link = getattr(subscription, 'subscription_url', None)
 
+    # Слитая подписка: отдаём пользователю бот-ссылку (Remnawave + внешние конфиги)
+    # вместо прямой панельной. Бот тянет панель сам и подмешивает внешние.
+    if settings.is_merged_subscription_enabled():
+        short_uuid = getattr(subscription, 'remnawave_short_uuid', None)
+        bot_link = settings.get_bot_subscription_url(short_uuid)
+        if bot_link:
+            return bot_link
+
     if settings.is_happ_cryptolink_mode():
         crypto_link = getattr(subscription, 'subscription_crypto_link', None)
         return crypto_link or base_link

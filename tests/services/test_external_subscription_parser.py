@@ -64,3 +64,34 @@ def test_build_links_join_then_b64_roundtrip():
     body = base64.b64encode('\n'.join(links).encode()).decode()
     decoded = base64.b64decode(body).decode()
     assert decoded.splitlines() == links
+
+
+def test_merge_remnawave_base64_with_external():
+    # Remnawave отдаёт base64-список → внешние добавляются в конец, всё перекодируется
+    rw_links = ['vless://uuid@panel.example.com:443#Panel-1', 'vless://uuid@panel2.example.com:443#Panel-2']
+    rw_body = base64.b64encode('\n'.join(rw_links).encode()).decode()
+    external = ['trojan://pass@ext.example.com:8443#Ext-1']
+    merged = svc.merge_remnawave_with_external(rw_body, external)
+    decoded = base64.b64decode(merged).decode().splitlines()
+    assert decoded == rw_links + external  # порядок: сначала панель, затем внешние
+
+
+def test_merge_remnawave_plaintext_with_external():
+    rw_body = 'vless://uuid@panel.example.com:443#Panel-1\n'
+    merged = svc.merge_remnawave_with_external(rw_body, ['ss://x@e.com:8388#E'])
+    decoded = base64.b64decode(merged).decode().splitlines()
+    assert decoded == ['vless://uuid@panel.example.com:443#Panel-1', 'ss://x@e.com:8388#E']
+
+
+def test_merge_passthrough_for_non_link_body():
+    # Не список ссылок (напр. clash YAML) → отдаём как есть, внешние не подмешиваем
+    yaml_body = 'proxies:\n  - name: a\n    type: vless\n'
+    merged = svc.merge_remnawave_with_external(yaml_body, ['vless://ext'])
+    assert merged == yaml_body
+
+
+def test_merge_no_external_keeps_panel_only():
+    rw_links = ['vless://uuid@p.example.com:443#P']
+    rw_body = base64.b64encode('\n'.join(rw_links).encode()).decode()
+    merged = svc.merge_remnawave_with_external(rw_body, [])
+    assert base64.b64decode(merged).decode().splitlines() == rw_links

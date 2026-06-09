@@ -199,3 +199,67 @@ async def build_external_subscription_b64(db: AsyncSession) -> str:
     links = await crud.get_selected_active_links(db)
     plain = '\n'.join(links)
     return base64.b64encode(plain.encode('utf-8')).decode('utf-8')
+
+
+# ---------------------------------------------------------------------------
+# Слитая подписка: Remnawave пользователя + внешние конфиги
+# ---------------------------------------------------------------------------
+
+# Заголовки ответа Remnawave, которые нужно пробросить клиенту (трафик/срок/профиль)
+_PROXY_RESPONSE_HEADERS = (
+    'subscription-userinfo',
+    'profile-update-interval',
+    'profile-title',
+    'profile-web-page-url',
+    'support-url',
+    'announce',
+)
+
+
+async def fetch_remnawave_subscription(url: str, user_agent: str | None) -> tuple[int, str, dict[str, str]]:
+    """Серверный фетч подписки Remnawave пользователя. Форвардит User-Agent клиента,
+    чтобы панель вернула формат под конкретный клиент (Happ/clash/...).
+
+    Returns: (status_code, body_text, proxied_headers).
+    """
+    headers = {'Accept': '*/*'}
+    if user_agent:
+        headers['User-Agent'] = user_agent
+    timeout = aiohttp.ClientTimeout(total=_FETCH_TIMEOUT_SECONDS)
+    connector = aiohttp.TCPConnector(ssl=False)
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+        async with session.get(url, headers=headers, allow_redirects=True) as resp:
+            body = await resp.text()
+            proxied = {k: v for k, v in resp.headers.items() if k.lower() in _PROXY_RESPONSE_HEADERS}
+            return resp.status, body, proxied
+
+
+def merge_remnawave_with_external(remnawave_body: str, external_links: list[str]) -> str:
+    """Сливает контент Remnawave с внешними ссылками в base64-список (формат Happ/v2ray).
+
+    Если тело Remnawave — это список ссылок (base64 или plaintext), внешние добавляются в конец
+    и всё перекодируется в base64. Если формат не распознан (clash/singbox YAML/JSON) — возвращаем
+    тело как есть, чтобы не сломать клиент (внешние в таких форматах не подмешиваем).
+    """
+    rw_items = parse_subscription(remnawave_body)
+    if not rw_items:
+        # Не список ссылок — отдаём как есть (passthrough), внешние не трогаем
+        return remnawave_body
+    rw_links = [item['raw_link'] for item in rw_items]
+    combined = rw_links + [link for link in external_links if link]
+    return base64.b64encode('\n'.join(combined).encode('utf-8')).decode('utf-8')
+
+
+async def build_merged_subscription(
+    db: AsyncSession, remnawave_url: str, user_agent: str | None
+) -> tuple[int, str, dict[str, str]]:
+    """Фетчит подписку Remnawave пользователя и подмешивает выбранные внешние конфиги.
+
+    Returns: (status_code, merged_body, proxied_headers).
+    """
+    status, body, proxied = await fetch_remnawave_subscription(remnawave_url, user_agent)
+    if status >= 400:
+        return status, body, proxied
+    external_links = await crud.get_selected_active_links(db)
+    merged = merge_remnawave_with_external(body, external_links)
+    return status, merged, proxied

@@ -975,6 +975,10 @@ class Settings(BaseSettings):
     EXTERNAL_SUB_PROFILE_TITLE: str = 'Extra'
     EXTERNAL_SUB_PROFILE_UPDATE_HOURS: int = 12
 
+    # Слитая подписка: бот отдаёт персональную ссылку = конфиги Remnawave пользователя + внешние.
+    # При включении get_display_subscription_link выдаёт пользователям бот-ссылку вместо панельной.
+    MERGED_SUBSCRIPTION_ENABLED: bool = False
+
     VERSION_CHECK_ENABLED: bool = True
     VERSION_CHECK_REPO: str = 'fr1ngg/remnawave-bedolaga-telegram-bot'
     VERSION_CHECK_INTERVAL_HOURS: int = 1
@@ -3070,6 +3074,16 @@ class Settings(BaseSettings):
         if not base or not token:
             return None
         return f'{base}/extsub/{token}'
+
+    def is_merged_subscription_enabled(self) -> bool:
+        return bool(self.MERGED_SUBSCRIPTION_ENABLED)
+
+    def get_bot_subscription_url(self, short_uuid: str | None) -> str | None:
+        """Персональный URL слитой подписки бота: <base>/sub/<short_uuid>."""
+        base = self.get_external_sub_base_url()
+        if not base or not short_uuid:
+            return None
+        return f'{base}/sub/{short_uuid}'
 
     def get_web_api_allowed_origins(self) -> list[str]:
         raw = (self.WEB_API_ALLOWED_ORIGINS or '').split(',')

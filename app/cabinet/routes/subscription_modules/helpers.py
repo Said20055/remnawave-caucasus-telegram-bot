@@ -101,6 +101,16 @@ def _apply_addon_discount(
     }
 
 
+def _display_subscription_url(subscription: Subscription) -> str | None:
+    """URL подписки для показа пользователю: бот-ссылка (Remnawave + внешние) при
+    включённой слитой подписке, иначе — прямая панельная."""
+    if settings.is_merged_subscription_enabled():
+        bot_url = settings.get_bot_subscription_url(getattr(subscription, 'remnawave_short_uuid', None))
+        if bot_url:
+            return bot_url
+    return subscription.subscription_url
+
+
 def _subscription_to_response(
     subscription: Subscription,
     servers: list[ServerInfo] | None = None,
@@ -218,7 +228,7 @@ def _subscription_to_response(
         servers=servers or [],
         autopay_enabled=subscription.autopay_enabled or False,
         autopay_days_before=subscription.autopay_days_before or 3,
-        subscription_url=subscription.subscription_url,
+        subscription_url=_display_subscription_url(subscription),
         hide_subscription_link=hide_link,
         is_active=is_active,
         is_expired=is_expired,

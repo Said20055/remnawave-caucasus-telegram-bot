@@ -95,3 +95,26 @@ def test_merge_no_external_keeps_panel_only():
     rw_body = base64.b64encode('\n'.join(rw_links).encode()).decode()
     merged = svc.merge_remnawave_with_external(rw_body, [])
     assert base64.b64decode(merged).decode().splitlines() == rw_links
+
+
+def test_apply_display_name_replaces_fragment():
+    out = svc.apply_display_name('vless://uuid@h.com:443?x=1#OldName', 'Моя Нода')
+    base, frag = out.rsplit('#', 1)
+    assert base == 'vless://uuid@h.com:443?x=1'
+    assert frag == '%D0%9C%D0%BE%D1%8F%20%D0%9D%D0%BE%D0%B4%D0%B0'  # url-encoded
+
+
+def test_apply_display_name_adds_fragment_when_absent():
+    out = svc.apply_display_name('trojan://p@h.com:8443', 'Name')
+    assert out == 'trojan://p@h.com:8443#Name'
+
+
+def test_apply_display_name_empty_keeps_original():
+    raw = 'vless://uuid@h.com:443#Orig'
+    assert svc.apply_display_name(raw, '') == raw
+    assert svc.apply_display_name(raw, None) == raw
+
+
+def test_apply_display_name_skips_vmess():
+    raw = 'vmess://eyJhZGQiOiJoLmNvbSJ9'
+    assert svc.apply_display_name(raw, 'Custom') == raw  # vmess не трогаем

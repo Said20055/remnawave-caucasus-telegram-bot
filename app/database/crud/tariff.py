@@ -3,10 +3,41 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.database.models import PromoGroup, Subscription, SubscriptionStatus, Tariff
+from app.database.models import PromoGroup, Subscription, SubscriptionStatus, Tariff, TariffOneTimePurchase
 
 
 logger = structlog.get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Одноразовые тарифы (is_one_time): журнал покупок
+# ---------------------------------------------------------------------------
+
+
+async def has_user_purchased_one_time(db: AsyncSession, user_id: int, tariff_id: int) -> bool:
+    """Покупал ли пользователь этот одноразовый тариф ранее (успешно)."""
+    result = await db.execute(
+        select(TariffOneTimePurchase.id).where(
+            TariffOneTimePurchase.user_id == user_id,
+            TariffOneTimePurchase.tariff_id == tariff_id,
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def get_user_purchased_one_time_ids(db: AsyncSession, user_id: int) -> set[int]:
+    """Множество id одноразовых тарифов, уже купленных пользователем."""
+    result = await db.execute(
+        select(TariffOneTimePurchase.tariff_id).where(TariffOneTimePurchase.user_id == user_id)
+    )
+    return {row[0] for row in result.all()}
+
+
+async def record_one_time_purchase(db: AsyncSession, user_id: int, tariff_id: int) -> None:
+    """Фиксирует покупку одноразового тарифа. UNIQUE(user_id, tariff_id) защищает от гонки —
+    при повторе вставка упадёт IntegrityError и откатит транзакцию. Не коммитит."""
+    db.add(TariffOneTimePurchase(user_id=user_id, tariff_id=tariff_id))
+    await db.flush()
 
 
 def _normalize_period_prices(period_prices: dict[int, int] | None) -> dict[str, int]:
@@ -131,10 +162,14 @@ async def get_all_active_tariffs(db: AsyncSession) -> list[Tariff]:
 async def get_tariffs_for_user(
     db: AsyncSession,
     promo_group_id: int | None = None,
+    user_id: int | None = None,
 ) -> list[Tariff]:
     """
     Получает тарифы, доступные для пользователя с учетом его промогруппы.
     Если у тарифа нет ограничений по промогруппам - он доступен всем.
+
+    Если передан user_id — одноразовые тарифы (is_one_time), уже купленные этим
+    пользователем, исключаются из списка.
     """
     query = (
         select(Tariff)
@@ -146,9 +181,16 @@ async def get_tariffs_for_user(
     result = await db.execute(query)
     tariffs = result.scalars().all()
 
+    purchased_one_time: set[int] = set()
+    if user_id is not None:
+        purchased_one_time = await get_user_purchased_one_time_ids(db, user_id)
+
     # Фильтруем по промогруппе
     available_tariffs = []
     for tariff in tariffs:
+        # Одноразовый тариф, уже купленный пользователем — скрываем
+        if getattr(tariff, 'is_one_time', False) and tariff.id in purchased_one_time:
+            continue
         if not tariff.allowed_promo_groups:
             # Нет ограничений - доступен всем
             available_tariffs.append(tariff)
@@ -202,6 +244,9 @@ async def create_tariff(
     external_squad_uuid: str | None = None,
     # Следующий тариф для авто-перехода (интро → целевой)
     next_tariff_id: int | None = None,
+    next_tariff_period_days: int | None = None,
+    # Одноразовый тариф
+    is_one_time: bool = False,
 ) -> Tariff:
     """Создает новый тариф."""
     normalized_prices = _normalize_period_prices(period_prices)
@@ -242,6 +287,8 @@ async def create_tariff(
         traffic_reset_mode=traffic_reset_mode,
         # Внешний сквад
         external_squad_uuid=external_squad_uuid,
+        next_tariff_period_days=next_tariff_period_days,
+        is_one_time=is_one_time,
         # Следующий тариф для авто-перехода
         next_tariff_id=next_tariff_id,
     )
@@ -315,6 +362,8 @@ async def update_tariff(
     external_squad_uuid: str | None = ...,  # ... = не передан, None = убрать внешний сквад
     # Следующий тариф для авто-перехода (интро → целевой)
     next_tariff_id: int | None = ...,  # ... = не передан, None = убрать переход
+    next_tariff_period_days: int | None = ...,  # ... = не передан, None = сбросить период
+    is_one_time: bool = ...,  # ... = не передан
 ) -> Tariff:
     """Обновляет существующий тариф."""
     if name is not None:
@@ -387,6 +436,10 @@ async def update_tariff(
     # Следующий тариф для авто-перехода
     if next_tariff_id is not ...:
         tariff.next_tariff_id = next_tariff_id
+    if next_tariff_period_days is not ...:
+        tariff.next_tariff_period_days = next_tariff_period_days
+    if is_one_time is not ...:
+        tariff.is_one_time = is_one_time
 
     # Обновляем промогруппы если указаны
     if promo_group_ids is not None:

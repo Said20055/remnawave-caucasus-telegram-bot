@@ -74,7 +74,21 @@ async def resolve_renewal_target(db: AsyncSession, subscription: Subscription) -
 
         next_tariff = await get_tariff_by_id(db, next_tariff_id)
         if next_tariff is not None:
-            return next_tariff, (next_tariff.get_shortest_period() or 30)
+            # Конкретный период целевого тарифа, заданный админом. Если он удалён из
+            # целевого тарифа (или не задан) — fallback на минимальный период.
+            period = getattr(tariff, 'next_tariff_period_days', None)
+            available = next_tariff.get_available_periods()
+            if not period or period not in available:
+                if period and available:
+                    logger.warning(
+                        'next_tariff_period_days отсутствует в целевом тарифе — fallback на минимальный',
+                        tariff_id=tariff.id,
+                        next_tariff_id=next_tariff.id,
+                        requested_period=period,
+                        available=available,
+                    )
+                period = next_tariff.get_shortest_period() or 30
+            return next_tariff, period
 
     return tariff, (tariff.get_shortest_period() or 30)
 

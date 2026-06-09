@@ -298,7 +298,7 @@ async def get_purchase_options(
                 # Fallback to legacy promo_group attribute
                 promo_group = getattr(user, 'promo_group', None)
             promo_group_id = promo_group.id if promo_group else None
-            tariffs = await get_tariffs_for_user(db, promo_group_id)
+            tariffs = await get_tariffs_for_user(db, promo_group_id, user_id=user.id)
 
             if settings.is_multi_tariff_enabled():
                 from app.database.crud.subscription import get_active_subscriptions_by_user_id

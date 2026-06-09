@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class ExternalConfigItem(BaseModel):
     id: int
     name: str
+    display_name: str | None = None
     protocol: str | None = None
     raw_link: str
     is_selected: bool
@@ -18,6 +19,10 @@ class ExternalConfigItem(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ConfigRenameRequest(BaseModel):
+    display_name: str | None = Field(None, max_length=255)
 
 
 class ExternalSourceListItem(BaseModel):

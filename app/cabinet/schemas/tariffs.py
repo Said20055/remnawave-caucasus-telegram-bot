@@ -118,6 +118,9 @@ class TariffDetailResponse(BaseModel):
     # Авто-переход на следующий тариф при первом продлении (интро → целевой)
     next_tariff_id: int | None = None
     next_tariff_name: str | None = None
+    next_tariff_period_days: int | None = None
+    # Одноразовый тариф (доступен до первой успешной покупки)
+    is_one_time: bool = False
     # Показывать в подарках
     show_in_gift: bool = True
     created_at: datetime
@@ -178,6 +181,9 @@ class TariffCreateRequest(BaseModel):
     external_squad_uuid: str | None = Field(None, pattern=UUID_PATTERN)
     # Авто-переход на следующий тариф при первом продлении (интро → целевой)
     next_tariff_id: int | None = Field(None, ge=1)
+    next_tariff_period_days: int | None = Field(None, ge=1)
+    # Одноразовый тариф
+    is_one_time: bool = False
     # Показывать в подарках
     show_in_gift: bool = True
 
@@ -221,6 +227,9 @@ class TariffUpdateRequest(BaseModel):
     external_squad_uuid: str | None = Field(None, pattern=UUID_PATTERN)
     # Авто-переход на следующий тариф при первом продлении (интро → целевой)
     next_tariff_id: int | None = Field(None, ge=1)
+    next_tariff_period_days: int | None = Field(None, ge=1)
+    # Одноразовый тариф
+    is_one_time: bool | None = None
     # Показывать в подарках
     show_in_gift: bool | None = None
 

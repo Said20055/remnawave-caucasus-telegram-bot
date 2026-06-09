@@ -13,6 +13,7 @@ from app.services import external_subscription_service as ext_service
 
 from ..dependencies import get_cabinet_db, require_permission
 from ..schemas.external_subscription import (
+    ConfigRenameRequest,
     CreateSourceRequest,
     ExternalConfigItem,
     ExternalSourceDetailResponse,
@@ -138,6 +139,24 @@ async def refresh_source(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail='Source not found')
     stats = await ext_service.refresh_source(db, source)
     return RefreshResponse(**{k: v for k, v in stats.items() if k in RefreshResponse.model_fields})
+
+
+@router.patch('/{source_id}/configs/{config_id}', response_model=ExternalSourceDetailResponse)
+async def rename_config(
+    source_id: int,
+    config_id: int,
+    payload: ConfigRenameRequest,
+    admin: User = Depends(require_permission('servers:edit')),
+    db: AsyncSession = Depends(get_cabinet_db),
+):
+    """Задаёт кастомное отображаемое имя конфигу (видят пользователи). Пусто → имя из источника."""
+    source = await crud.get_source(db, source_id)
+    if not source:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail='Source not found')
+    updated = await crud.set_config_display_name(db, config_id, payload.display_name)
+    if updated is None or updated.source_id != source_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail='Config not found')
+    return await _detail(db, source)
 
 
 @router.put('/{source_id}/selection', response_model=ExternalSourceDetailResponse)

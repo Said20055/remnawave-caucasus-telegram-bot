@@ -11,7 +11,7 @@ import base64
 import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import aiohttp
 import structlog
@@ -82,6 +82,18 @@ def _remote_key(raw_link: str, protocol: str | None, name: str) -> str:
         digest = hashlib.sha1(raw_link.encode('utf-8')).hexdigest()
         key = f'{proto}|{digest}'
     return key[:255]
+
+
+def apply_display_name(raw_link: str, display_name: str | None) -> str:
+    """Подставляет кастомное имя (display_name) во фрагмент ссылки (#name), которое видит
+    пользователь в клиенте. Если имя пустое — ссылка не меняется. Для vmess:// (имя внутри
+    base64-JSON 'ps') не трогаем, чтобы не сломать ссылку.
+    """
+    name = (display_name or '').strip()
+    if not name or raw_link.startswith('vmess://'):
+        return raw_link
+    base = raw_link.rsplit('#', 1)[0] if '#' in raw_link else raw_link
+    return f'{base}#{quote(name, safe="")}'
 
 
 def _extract_links(text: str) -> list[dict]:

@@ -325,12 +325,18 @@ async def create_paid_subscription(
     # иначе авто-переход на целевой тариф не сработает — autopay/recurrent
     # фильтруют подписки по autopay_enabled == True.
     autopay_enabled = settings.is_autopay_enabled_by_default()
+    tariff_is_one_time = False
     if tariff_id and not is_trial:
-        from app.database.crud.tariff import get_tariff_by_id
+        from app.database.crud.tariff import get_tariff_by_id, has_user_purchased_one_time
 
         _tariff = await get_tariff_by_id(db, tariff_id, with_promo_groups=False)
         if _tariff is not None and getattr(_tariff, 'next_tariff_id', None):
             autopay_enabled = True
+        if _tariff is not None and getattr(_tariff, 'is_one_time', False):
+            tariff_is_one_time = True
+            # Защита: одноразовый тариф нельзя купить повторно
+            if await has_user_purchased_one_time(db, user_id, tariff_id):
+                raise ValueError('one_time_tariff_already_purchased')
 
     subscription = Subscription(
         user_id=user_id,
@@ -348,6 +354,12 @@ async def create_paid_subscription(
     )
 
     db.add(subscription)
+    # Одноразовый тариф: фиксируем покупку в той же транзакции. UNIQUE(user_id, tariff_id)
+    # защищает от гонки — параллельная вторая покупка упадёт здесь и откатит транзакцию.
+    if tariff_is_one_time:
+        from app.database.crud.tariff import record_one_time_purchase
+
+        await record_one_time_purchase(db, user_id, tariff_id)
     if commit:
         await db.commit()
         await db.refresh(subscription)

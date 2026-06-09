@@ -165,6 +165,21 @@ async def deactivate_missing_configs(
     return deactivated
 
 
+async def set_config_display_name(
+    db: AsyncSession, config_id: int, display_name: str | None
+) -> ExternalConfig | None:
+    """Задаёт/сбрасывает кастомное имя конфига. Пустая строка → NULL (имя из источника)."""
+    result = await db.execute(select(ExternalConfig).where(ExternalConfig.id == config_id))
+    config = result.scalar_one_or_none()
+    if config is None:
+        return None
+    name = (display_name or '').strip()
+    config.display_name = name or None
+    await db.commit()
+    await db.refresh(config)
+    return config
+
+
 async def set_config_selection(db: AsyncSession, config_id: int, is_selected: bool) -> ExternalConfig | None:
     result = await db.execute(select(ExternalConfig).where(ExternalConfig.id == config_id))
     config = result.scalar_one_or_none()
@@ -190,10 +205,10 @@ async def set_source_selection(db: AsyncSession, source_id: int, selected_ids: l
     return changed
 
 
-async def get_selected_active_links(db: AsyncSession) -> list[str]:
-    """Сырые ссылки всех выбранных и активных конфигов (для выдачи подписки)."""
+async def get_selected_active_configs(db: AsyncSession) -> list[tuple[str, str | None]]:
+    """(raw_link, display_name) всех выбранных и активных конфигов (для выдачи подписки)."""
     result = await db.execute(
-        select(ExternalConfig.raw_link)
+        select(ExternalConfig.raw_link, ExternalConfig.display_name)
         .join(ExternalSubscriptionSource, ExternalConfig.source_id == ExternalSubscriptionSource.id)
         .where(
             ExternalConfig.is_selected == True,
@@ -202,7 +217,15 @@ async def get_selected_active_links(db: AsyncSession) -> list[str]:
         )
         .order_by(ExternalConfig.source_id.asc(), ExternalConfig.id.asc())
     )
-    return [row[0] for row in result.all()]
+    return [(row[0], row[1]) for row in result.all()]
+
+
+async def get_selected_active_links(db: AsyncSession) -> list[str]:
+    """Сырые ссылки выбранных активных конфигов с применённым кастомным именем (display_name)."""
+    from app.services.external_subscription_service import apply_display_name
+
+    configs = await get_selected_active_configs(db)
+    return [apply_display_name(raw, dn) for raw, dn in configs]
 
 
 async def count_selected_active(db: AsyncSession) -> int:

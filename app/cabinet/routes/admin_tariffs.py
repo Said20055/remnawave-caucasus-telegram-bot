@@ -280,11 +280,37 @@ async def get_tariff(
         # Авто-переход на следующий тариф
         next_tariff_id=tariff.next_tariff_id,
         next_tariff_name=next_tariff_name,
+        next_tariff_period_days=tariff.next_tariff_period_days,
+        # Одноразовый тариф
+        is_one_time=tariff.is_one_time,
         # Показывать в подарках
         show_in_gift=tariff.show_in_gift,
         created_at=tariff.created_at,
         updated_at=tariff.updated_at,
     )
+
+
+async def _validate_next_tariff_period(
+    db: AsyncSession, next_tariff_id: int | None, next_tariff_period_days: int | None
+) -> int | None:
+    """Проверяет авто-переход: если задан целевой тариф — обязателен валидный период из него.
+
+    Возвращает период (или None, если перехода нет). Бросает HTTP 400 при ошибке.
+    """
+    if not next_tariff_id:
+        return None
+    target = await get_tariff_by_id(db, next_tariff_id, with_promo_groups=False)
+    if not target:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail='next_tariff_not_found')
+    available = target.get_available_periods()
+    if not next_tariff_period_days:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail='next_tariff_period_required')
+    if next_tariff_period_days not in available:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={'code': 'next_tariff_period_invalid', 'available': available},
+        )
+    return next_tariff_period_days
 
 
 @router.post('', response_model=TariffDetailResponse)
@@ -295,6 +321,8 @@ async def create_new_tariff(
 ):
     """Create a new tariff."""
     period_prices_dict = _period_prices_to_dict(request.period_prices)
+
+    next_period = await _validate_next_tariff_period(db, request.next_tariff_id, request.next_tariff_period_days)
 
     # Преобразуем ServerTrafficLimit в dict для хранения
     server_limits_dict = (
@@ -340,6 +368,9 @@ async def create_new_tariff(
         external_squad_uuid=request.external_squad_uuid,
         # Авто-переход на следующий тариф
         next_tariff_id=request.next_tariff_id,
+        next_tariff_period_days=next_period,
+        # Одноразовый тариф
+        is_one_time=request.is_one_time,
         # Показывать в подарках
         show_in_gift=request.show_in_gift,
     )
@@ -446,13 +477,27 @@ async def update_existing_tariff(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail='Tariff cannot reference itself as the next tariff',
                 )
-            target = await get_tariff_by_id(db, request.next_tariff_id, with_promo_groups=False)
-            if target is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='Next tariff not found',
-                )
+            # Период: из запроса, иначе сохраняем текущий у тарифа
+            period = (
+                request.next_tariff_period_days
+                if 'next_tariff_period_days' in request.model_fields_set
+                else tariff.next_tariff_period_days
+            )
+            updates['next_tariff_period_days'] = await _validate_next_tariff_period(
+                db, request.next_tariff_id, period
+            )
+        else:
+            # Сброс перехода — обнуляем и период
+            updates['next_tariff_period_days'] = None
         updates['next_tariff_id'] = request.next_tariff_id
+    elif 'next_tariff_period_days' in request.model_fields_set:
+        # Меняют только период (тариф уже задан) — валидируем по текущему целевому
+        updates['next_tariff_period_days'] = await _validate_next_tariff_period(
+            db, tariff.next_tariff_id, request.next_tariff_period_days
+        )
+    # Одноразовый тариф
+    if request.is_one_time is not None:
+        updates['is_one_time'] = request.is_one_time
     # Показывать в подарках
     if request.show_in_gift is not None:
         updates['show_in_gift'] = request.show_in_gift

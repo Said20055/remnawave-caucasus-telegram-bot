@@ -1658,6 +1658,11 @@ class Tariff(Base):
     # Следующий тариф для авто-перехода при первом продлении (интро-тариф → целевой).
     # NULL = обычный тариф, авто-перехода нет.
     next_tariff_id = Column(Integer, ForeignKey('tariffs.id', ondelete='SET NULL'), nullable=True, default=None)
+    # Конкретный период (дни) целевого тарифа для авто-перехода. NULL = минимальный период целевого.
+    next_tariff_period_days = Column(Integer, nullable=True, default=None)
+
+    # Одноразовый тариф: доступен пользователю только до первой успешной покупки.
+    is_one_time = Column(Boolean, default=False, server_default='false', nullable=False)
 
     created_at = Column(AwareDateTime(), default=func.now())
     updated_at = Column(AwareDateTime(), default=func.now(), onupdate=func.now())
@@ -4126,6 +4131,9 @@ class ExternalConfig(Base):
         index=True,
     )
     name = Column(String(255), nullable=False)
+    # Кастомное имя от админа — видят пользователи. Если NULL/пусто — берётся name из источника.
+    # НЕ сбрасывается при автообновлении источника.
+    display_name = Column(String(255), nullable=True)
     raw_link = Column(Text, nullable=False)
     protocol = Column(String(20), nullable=True)
     # Стабильный ключ конфига внутри источника (protocol+host:port) — для матчинга при обновлении
@@ -4140,3 +4148,26 @@ class ExternalConfig(Base):
 
     def __repr__(self):
         return f"<ExternalConfig(id={self.id}, source={self.source_id}, proto='{self.protocol}', selected={self.is_selected})>"
+
+
+class TariffOneTimePurchase(Base):
+    """Журнал покупок одноразовых тарифов: один пользователь — один тариф (UNIQUE).
+
+    Используется для блокировки повторной покупки тарифа с флагом is_one_time.
+    UNIQUE(user_id, tariff_id) даёт защиту от гонки: вторая одновременная покупка
+    упадёт на вставке и откатит транзакцию.
+    """
+
+    __tablename__ = 'tariff_one_time_purchases'
+    __table_args__ = (
+        UniqueConstraint('user_id', 'tariff_id', name='uq_one_time_purchase_user_tariff'),
+        Index('ix_one_time_purchase_user', 'user_id'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    tariff_id = Column(Integer, ForeignKey('tariffs.id', ondelete='CASCADE'), nullable=False)
+    created_at = Column(AwareDateTime(), server_default=func.now())
+
+    def __repr__(self):
+        return f'<TariffOneTimePurchase(user={self.user_id}, tariff={self.tariff_id})>'

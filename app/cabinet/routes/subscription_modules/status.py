@@ -157,8 +157,13 @@ async def get_connection_link(
     connect_mode = settings.CONNECT_BUTTON_MODE
     hide_subscription_link = settings.should_hide_subscription_link()
 
+    # Слитая подписка: пользователю отдаём бот-ссылку (Remnawave + внешние) как основную
+    public_subscription_url = subscription_url
+    if settings.is_merged_subscription_enabled() and display_link:
+        public_subscription_url = display_link
+
     return {
-        'subscription_url': subscription_url if not hide_subscription_link else None,
+        'subscription_url': public_subscription_url if not hide_subscription_link else None,
         'display_link': display_link if not hide_subscription_link else None,
         'happ_redirect_link': happ_redirect,
         'happ_scheme_link': happ_scheme_link,

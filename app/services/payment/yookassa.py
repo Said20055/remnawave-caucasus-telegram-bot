@@ -24,6 +24,22 @@ if TYPE_CHECKING:
 
 _INT32_MAX = 2_147_483_647
 
+# Человекочитаемые названия способов оплаты YooKassa для уведомлений пользователю
+_YK_METHOD_TITLES = {
+    'sbp': 'СБП',
+    'bank_card': 'Банковская карта',
+    'yoo_money': 'ЮMoney',
+    'sberbank': 'СберPay',
+    'tinkoff_bank': 'Т-Банк',
+    'mir_pay': 'Mir Pay',
+}
+
+
+def _yk_method_title(method_type: str | None) -> str:
+    """Название способа оплаты для уведомления (по умолчанию — банковская карта)."""
+    base = _YK_METHOD_TITLES.get(method_type or '', 'Банковская карта')
+    return f'{base} (YooKassa)'
+
 
 class YooKassaPaymentMixin:
     """Mixin с операциями по созданию и подтверждению платежей YooKassa."""
@@ -914,13 +930,17 @@ class YooKassaPaymentMixin:
                         # Отправляем уведомление пользователю (только Telegram-пользователям)
                         if getattr(self, 'bot', None) and user.telegram_id:
                             try:
+                                # Корректное название способа оплаты (СБП/карта/ЮMoney/...)
+                                _method_type = getattr(payment, 'payment_method_type', None) or (
+                                    (event_object or {}).get('payment_method') or {}
+                                ).get('type')
                                 # Передаем только простые данные, чтобы избежать проблем с ленивой загрузкой
                                 await self._send_payment_success_notification(
                                     user.telegram_id,
                                     payment.amount_kopeks,
                                     user=None,  # Передаем None, чтобы _ensure_user_snapshot загрузил данные сам
                                     db=db,
-                                    payment_method_title='Банковская карта (YooKassa)',
+                                    payment_method_title=_yk_method_title(_method_type),
                                 )
                                 logger.info('Уведомление пользователю о платеже отправлено успешно')
                             except Exception as error:

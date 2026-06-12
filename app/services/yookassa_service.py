@@ -213,6 +213,11 @@ class YooKassaService:
 
             builder.set_payment_method_data({'type': 'sbp'})
 
+            # Рекуррентные платежи по СБП: сохранение способа оплаты для автоплатежа.
+            # Только при явном opt-in — требует включённых «СБП автоплатежей» у мерчанта ЮKassa.
+            if settings.YOOKASSA_RECURRENT_ENABLED and settings.YOOKASSA_SBP_RECURRENT_ENABLED:
+                builder.set_save_payment_method(True)
+
             receipt_items_list: list[dict[str, Any]] = [
                 {
                     'description': description[:128],

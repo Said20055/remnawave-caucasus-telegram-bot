@@ -391,6 +391,9 @@ class Settings(BaseSettings):
     YOOKASSA_MAX_AMOUNT_KOPEKS: int = 1000000
     YOOKASSA_RECURRENT_ENABLED: bool = False
     YOOKASSA_RECURRENT_REQUIRED: bool = False
+    # Сохранять способ оплаты СБП для автоплатежей. Требует включённых «СБП автоплатежей»
+    # в кабинете ЮKassa (отдельная фича мерчанта), иначе save_payment_method для СБП не сработает.
+    YOOKASSA_SBP_RECURRENT_ENABLED: bool = False
     YOOKASSA_TEST_MODE: bool = False
     SUPPORT_TOPUP_ENABLED: bool = True
     PAYMENT_VERIFICATION_AUTO_CHECK_ENABLED: bool = False
